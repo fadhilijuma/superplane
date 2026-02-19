@@ -25,17 +25,44 @@ var exampleDataOnAlertEventBytes []byte
 var exampleDataOnAlertEventOnce sync.Once
 var exampleDataOnAlertEvent map[string]any
 
-// ExampleOutput returns sample output data for Query Prometheus.
+//go:embed example_output_create_http_synthetic_check.json
+var exampleOutputCreateHTTPSyntheticCheckBytes []byte
+
+var exampleOutputCreateHTTPSyntheticCheckOnce sync.Once
+var exampleOutputCreateHTTPSyntheticCheck map[string]any
+
+//go:embed example_output_update_http_synthetic_check.json
+var exampleOutputUpdateHTTPSyntheticCheckBytes []byte
+
+var exampleOutputUpdateHTTPSyntheticCheckOnce sync.Once
+var exampleOutputUpdateHTTPSyntheticCheck map[string]any
+
+//go:embed example_output_delete_http_synthetic_check.json
+var exampleOutputDeleteHTTPSyntheticCheckBytes []byte
+
+var exampleOutputDeleteHTTPSyntheticCheckOnce sync.Once
+var exampleOutputDeleteHTTPSyntheticCheck map[string]any
+
 func (c *QueryPrometheus) ExampleOutput() map[string]any {
 	return utils.UnmarshalEmbeddedJSON(&exampleOutputQueryPrometheusOnce, exampleOutputQueryPrometheusBytes, &exampleOutputQueryPrometheus)
 }
 
-// ExampleOutput returns sample output data for List Issues.
 func (c *ListIssues) ExampleOutput() map[string]any {
 	return utils.UnmarshalEmbeddedJSON(&exampleOutputListIssuesOnce, exampleOutputListIssuesBytes, &exampleOutputListIssues)
 }
 
-// ExampleData returns sample webhook payload data for On Alert Event trigger.
 func (t *OnAlertEvent) ExampleData() map[string]any {
 	return utils.UnmarshalEmbeddedJSON(&exampleDataOnAlertEventOnce, exampleDataOnAlertEventBytes, &exampleDataOnAlertEvent)
+}
+
+func (c *CreateHTTPSyntheticCheck) ExampleOutput() map[string]any {
+	return utils.UnmarshalEmbeddedJSON(&exampleOutputCreateHTTPSyntheticCheckOnce, exampleOutputCreateHTTPSyntheticCheckBytes, &exampleOutputCreateHTTPSyntheticCheck)
+}
+
+func (c *UpdateHTTPSyntheticCheck) ExampleOutput() map[string]any {
+	return utils.UnmarshalEmbeddedJSON(&exampleOutputUpdateHTTPSyntheticCheckOnce, exampleOutputUpdateHTTPSyntheticCheckBytes, &exampleOutputUpdateHTTPSyntheticCheck)
+}
+
+func (c *DeleteHTTPSyntheticCheck) ExampleOutput() map[string]any {
+	return utils.UnmarshalEmbeddedJSON(&exampleOutputDeleteHTTPSyntheticCheckOnce, exampleOutputDeleteHTTPSyntheticCheckBytes, &exampleOutputDeleteHTTPSyntheticCheck)
 }

@@ -25,7 +25,7 @@ type Configuration struct {
 
 // Metadata stores integration-level metadata persisted by Sync.
 type Metadata struct {
-	// No metadata needed initially
+	WebhookURL string `json:"webhookURL,omitempty"`
 }
 
 // Name returns the stable integration identifier.
@@ -50,7 +50,21 @@ func (d *Dash0) Description() string {
 
 // Instructions returns optional setup instructions shown in the integration modal.
 func (d *Dash0) Instructions() string {
-	return ""
+	return `To set up the Dash0 integration:
+
+1. Go to your Dash0 dashboard -> **Organization Settings** -> **API Tokens**
+2. Click **Create API Token**, give it a name, and copy the token
+3. Paste the token in the **API Token** field below
+4. Copy your **Prometheus API Base URL** from **Organization Settings** -> **Endpoints** -> **Prometheus API**
+
+### Webhook Setup (for triggers)
+
+To receive Dash0 notifications:
+
+1. After connecting, copy the **Webhook URL** shown on the integration details page
+2. In your Dash0 dashboard, go to **Alerting** -> **Notification Channels**
+3. Create a new channel with type **Webhook**
+4. Paste the webhook URL and save`
 }
 
 // Configuration defines fields required to configure Dash0 connectivity.
@@ -80,12 +94,16 @@ func (d *Dash0) Components() []core.Component {
 	return []core.Component{
 		&QueryPrometheus{},
 		&ListIssues{},
+		&CreateHTTPSyntheticCheck{},
+		&UpdateHTTPSyntheticCheck{},
+		&DeleteHTTPSyntheticCheck{},
 	}
 }
 
 // Triggers returns all Dash0 triggers exposed in the workflow builder.
 func (d *Dash0) Triggers() []core.Trigger {
 	return []core.Trigger{
+		&OnNotification{},
 		&OnAlertEvent{},
 	}
 }
@@ -119,7 +137,17 @@ func (d *Dash0) Sync(ctx core.SyncContext) error {
 		return fmt.Errorf("error validating connection: %v", err)
 	}
 
-	ctx.Integration.SetMetadata(Metadata{})
+	webhookURL := ""
+	webhookID, err := ctx.Integration.EnsureIntegrationWebhook(struct{}{})
+	if err != nil {
+		return fmt.Errorf("error ensuring integration webhook: %v", err)
+	}
+
+	if webhookID != nil && ctx.WebhooksBaseURL != "" {
+		webhookURL = fmt.Sprintf("%s/api/v1/webhooks/%s", ctx.WebhooksBaseURL, webhookID.String())
+	}
+
+	ctx.Integration.SetMetadata(Metadata{WebhookURL: webhookURL})
 	ctx.Integration.Ready()
 	return nil
 }
@@ -131,31 +159,98 @@ func (d *Dash0) Cleanup(ctx core.IntegrationCleanupContext) error {
 
 // ListResources resolves integration resources used by resource selector fields.
 func (d *Dash0) ListResources(resourceType string, ctx core.ListResourcesContext) ([]core.IntegrationResource, error) {
-	if resourceType != "check-rule" {
-		return []core.IntegrationResource{}, nil
-	}
-
 	client, err := NewClient(ctx.HTTP, ctx.Integration)
 	if err != nil {
 		return nil, fmt.Errorf("error creating dash0 client: %w", err)
 	}
 
-	checkRules, err := client.ListCheckRules()
-	if err != nil {
-		ctx.Logger.Warnf("Error fetching check rules: %v", err)
+	switch resourceType {
+	case "check-rule":
+		checkRules, err := client.ListCheckRules()
+		if err != nil {
+			ctx.Logger.Warnf("Error fetching check rules: %v", err)
+			return []core.IntegrationResource{}, nil
+		}
+
+		resources := make([]core.IntegrationResource, 0, len(checkRules))
+		for _, rule := range checkRules {
+			resources = append(resources, core.IntegrationResource{
+				Type: resourceType,
+				Name: rule.Name,
+				ID:   rule.ID,
+			})
+		}
+
+		return resources, nil
+
+	case "synthetic-check":
+		checks, err := client.ListSyntheticChecks("default")
+		if err != nil {
+			ctx.Logger.Warnf("Error fetching synthetic checks: %v", err)
+			return []core.IntegrationResource{}, nil
+		}
+
+		resources := make([]core.IntegrationResource, 0, len(checks))
+		for _, check := range checks {
+			id, name := extractSyntheticCheckIDAndName(check)
+			if id == "" {
+				id = name
+			}
+			if id == "" {
+				continue
+			}
+			resources = append(resources, core.IntegrationResource{
+				Type: resourceType,
+				Name: name,
+				ID:   id,
+			})
+		}
+
+		return resources, nil
+
+	default:
 		return []core.IntegrationResource{}, nil
 	}
+}
 
-	resources := make([]core.IntegrationResource, 0, len(checkRules))
-	for _, rule := range checkRules {
-		resources = append(resources, core.IntegrationResource{
-			Type: resourceType,
-			Name: rule.Name,
-			ID:   rule.ID,
-		})
+// extractSyntheticCheckIDAndName extracts the check ID and display name from a raw
+// API response map, handling multiple possible Dash0 API response shapes.
+func extractSyntheticCheckIDAndName(check map[string]any) (id, name string) {
+	// Try metadata.labels["dash0.com/id"] and metadata.name
+	if metadata, ok := check["metadata"].(map[string]any); ok {
+		if metaName, ok := metadata["name"].(string); ok {
+			name = metaName
+		}
+		if labels, ok := metadata["labels"].(map[string]any); ok {
+			if labelID, ok := labels["dash0.com/id"].(string); ok {
+				id = labelID
+			}
+		}
+		// Try display name from spec.plugin.display.name
+		if spec, ok := check["spec"].(map[string]any); ok {
+			if plugin, ok := spec["plugin"].(map[string]any); ok {
+				if display, ok := plugin["display"].(map[string]any); ok {
+					if displayName, ok := display["name"].(string); ok && displayName != "" {
+						name = displayName
+					}
+				}
+			}
+		}
 	}
 
-	return resources, nil
+	// Fallback: top-level "id" and "name" fields (flat API format)
+	if id == "" {
+		if topID, ok := check["id"].(string); ok {
+			id = topID
+		}
+	}
+	if name == "" {
+		if topName, ok := check["name"].(string); ok {
+			name = topName
+		}
+	}
+
+	return id, name
 }
 
 // HandleRequest is unused because Dash0 integration has no custom HTTP routes.
